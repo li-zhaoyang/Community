@@ -16,7 +16,7 @@ object Betweenness {
     val inputFilePath: String = args(0)
     val outputDirPath: String = args(1)
 
-    val haveEdgeItemsNumThreshold = 1
+    val haveEdgeItemsNumThreshold = 7
 
     val conf = new SparkConf()
     conf.setAppName("hw4")
@@ -33,6 +33,7 @@ object Betweenness {
 //        .filter(_._2 > 0)    //checked that no duplicate user item pairs
         .mapValues(a => a.toSet)
         .cache()
+    val usersSet = userItemSet.keys.collect().map(_.toLong).toSet
 
     val users: RDD[(VertexId, Int)]=
       userItemSet
@@ -63,11 +64,10 @@ object Betweenness {
     val initialGraph: Graph[Int, Int] =
       Graph(users, relationships, defaultUser)
         .cache()
-
 //    initialGraph.edges.foreach(a => print("initial:" + a.srcId + "->" + a.dstId + ": " + a.attr + "\n"))
 
-    def vertexToBfsGraphFunFromGraph(graph: Graph[Int, Int]): ((VertexId, Int)) => List[((Long, Long), Double)] = {
-      val users = graph.vertices
+    def vertexToBfsGraphFunFromGraph(users:Set[VertexId], allEdges: Set[Edge[Int]]): ((VertexId, Int)) => List[((Long, Long), Double)] = {
+//      val users = graph.vertices
       def fun(thisVertex: (VertexId, Int)): List[((Long, Long), Double)]= {
         var travelledSet = Set(thisVertex._1)
         var lastLevelSet = Set(thisVertex._1)
@@ -75,18 +75,17 @@ object Betweenness {
         var bfsTreeEdgeList = List[(Long, Long)]()
         var vertexWeightMap =
           users
-            .map(_._1)
-            .collect()
+//            .map(_._1)
+//            .collect()
             .map(a => (a, 0.0))
             .toMap
             .updated(thisVertex._1, 1.0)
         while (lastLevelSet.nonEmpty) {
           val thisLevelEdgesList =
-            graph
-              .edges
+            allEdges
               .filter(a => lastLevelSet.contains(a.srcId) && !travelledSet.contains(a.dstId))
               .map(a => (a.srcId, a.dstId))
-              .collect()
+//              .collect()
               .toList
           bfsTreeEdgeList = bfsTreeEdgeList.union(thisLevelEdgesList)
           lastLevelSet =
@@ -107,9 +106,7 @@ object Betweenness {
         //        println(remainEdgeRDD.count())
         //        remainEdgeRDD.foreach(a => print(thisVertex._1+"# vertex remainEdge: " + a.srcId + "->" + a.dstId + ": " + a.attr + "\n"))
         //        var bfsTreeGraph = Graph(users, remainEdgeRDD).partitionBy(PartitionStrategy.fromString("EdgePartition1D"))
-        if (thisVertex._1 == 1L) {
-          bfsTreeEdgeList.foreach(a => print(a._1 + "->" + a._2 ))
-        }
+
         var bfsEdgeWeightMap = bfsTreeEdgeList.map(a => (a, 0.0)).toMap
         var outDegreeMap = bfsTreeEdgeList.groupBy(_._1).mapValues(_.size)
         val haveOutEdgeVerticeSet = outDegreeMap.keySet
@@ -120,10 +117,12 @@ object Betweenness {
         //        println("bottomUpLastSet Size:" + bottomUpLastSet.size)
         val inDegreeMap =  bfsTreeEdgeList.groupBy(_._2).mapValues(_.size)
 //        var outDegreeMap = outDegrees.collect().toMap
-        if (thisVertex._1 == 4L) println("indegreeMap:" + inDegreeMap)
-        if (thisVertex._1 == 4L) println("outdegreeMap:" + outDegreeMap)
-        vertexWeightMap = users.collect().map(a => (a._1, 1.0)).toMap
-        if (thisVertex._1 == 4L)  println("vertexWeightMap: " + vertexWeightMap)
+//        if (thisVertex._1 == 4L) println("indegreeMap:" + inDegreeMap)
+//        if (thisVertex._1 == 4L) println("outdegreeMap:" + outDegreeMap)
+        vertexWeightMap = users
+//          .collect()
+          .map(a => (a, 1.0)).toMap
+//        if (thisVertex._1 == 4L)  println("vertexWeightMap: " + vertexWeightMap)
 //        breakable {
           while (bottomUpLastSet.nonEmpty) {
 //            println("vertex:" + thisVertex +": " + bottomUpLastSet)
@@ -146,7 +145,7 @@ object Betweenness {
 //                    vertexWeightMap.getOrElse(a.dstId, 1.0) / inDegreeMap.getOrElse(a.dstId, 1).toDouble
 //                  )
 //                )
-              if (thisVertex._1 == 4L) thisEdges.foreach(a => println("thisEdges:" + a._1+ "->" + a._2 + ":" + bfsEdgeWeightMap.getOrElse(a, 0.0)))
+//              if (thisVertex._1 == 4L) thisEdges.foreach(a => println("thisEdges:" + a._1+ "->" + a._2 + ":" + bfsEdgeWeightMap.getOrElse(a, 0.0)))
 //            if (thisEdges.count() == 0) break
 //              travelledEdgeSet = travelledEdgeSet.union(thisEdges.collect().toSet)
             thisEdges
@@ -162,7 +161,7 @@ object Betweenness {
                       .updated(a._1, outDegreeMap.getOrElse(a._1, 1) - 1)
                   }
                 )
-            if (thisVertex._1 == 4L) println("outdegreeMap:" + outDegreeMap)
+//            if (thisVertex._1 == 4L) println("outdegreeMap:" + outDegreeMap)
             bottomUpLastSet =
               thisEdges
                 .map(_._1)
@@ -188,12 +187,12 @@ object Betweenness {
       fun
     }
     println("hhhhhhhhhhhhhhhhhhhhhhhh")
-
+    val allEdges = initialGraph.collectEdges(EdgeDirection.Out).flatMap(_._2).collect().toSet
     val bfsEdgesWeight = initialGraph
       .vertices
-      .collect()
-      .toList
-      .flatMap(vertexToBfsGraphFunFromGraph(initialGraph))
+//      .collect()
+//      .toList
+      .flatMap(vertexToBfsGraphFunFromGraph(usersSet, allEdges))
       .map(a => {
         if (a._1._1 > a._1._2) ((a._1._2, a._1._1), a._2)
         else a
