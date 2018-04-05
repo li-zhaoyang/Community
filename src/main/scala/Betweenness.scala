@@ -64,15 +64,15 @@ object Betweenness {
       Graph(users, relationships, defaultUser)
         .cache()
 
-    initialGraph.edges.foreach(a => print("initial:" + a.srcId + "->" + a.dstId + ": " + a.attr + "\n"))
+//    initialGraph.edges.foreach(a => print("initial:" + a.srcId + "->" + a.dstId + ": " + a.attr + "\n"))
 
-    def vertexToBfsGraphFunFromGraph(graph: Graph[Int, Int]): ((VertexId, Int)) => Graph[Int, Double] = {
+    def vertexToBfsGraphFunFromGraph(graph: Graph[Int, Int]): ((VertexId, Int)) => List[((Long, Long), Double)] = {
       val users = graph.vertices
-      def fun(thisVertex: (VertexId, Int)): Graph[Int, Double] = {
+      def fun(thisVertex: (VertexId, Int)): List[((Long, Long), Double)]= {
         var travelledSet = Set(thisVertex._1)
         var lastLevelSet = Set(thisVertex._1)
-        var remainEdgeRDD: RDD[Edge[Double]] = emptyEdgeRDD
-//        var bfsTreeEdgeSet = Set[(Long, Long)]()
+//        var remainEdgeRDD: RDD[Edge[Double]] = emptyEdgeRDD
+        var bfsTreeEdgeList = List[(Long, Long)]()
         var vertexWeightMap =
           users
             .map(_._1)
@@ -81,49 +81,45 @@ object Betweenness {
             .toMap
             .updated(thisVertex._1, 1.0)
         while (lastLevelSet.nonEmpty) {
-          val thisLevelEdges =
+          val thisLevelEdgesList =
             graph
               .edges
               .filter(a => lastLevelSet.contains(a.srcId) && !travelledSet.contains(a.dstId))
-                .map(a => Edge(a.srcId, a.dstId, a.attr.toDouble))
-                .cache()
-//          bfsTreeEdgeSet = bfsTreeEdgeSet.union(thisLevelEdges.collect().map(a => (a.srcId, a.dstId)).toSet)
-          lastLevelSet =
-            thisLevelEdges
-              .map(_.dstId)
+              .map(a => (a.srcId, a.dstId))
               .collect()
+              .toList
+          bfsTreeEdgeList = bfsTreeEdgeList.union(thisLevelEdgesList)
+          lastLevelSet =
+            thisLevelEdgesList
+              .map(_._2)
               .toSet
-          remainEdgeRDD = remainEdgeRDD.union(thisLevelEdges)
-//          println("remainRDDSize: " + remainEdgeRDD.count())
-//          thisLevelEdges
-          thisLevelEdges.collect().foreach(a => {
-            vertexWeightMap = vertexWeightMap.updated(
-              a.dstId,
-              vertexWeightMap.getOrElse(a.dstId, 0.0) + vertexWeightMap.getOrElse(a.srcId, 1.0)
-            )
-          })
+          //          remainEdgeRDD = remainEdgeRDD.union(thisLevelEdges)
+          //          println("remainRDDSize: " + remainEdgeRDD.count())
+          //          thisLevelEdges
+          //          thisLevelEdgesList.foreach(a => {
+          //            vertexWeightMap = vertexWeightMap.updated(
+          //              a._2,
+          //              vertexWeightMap.getOrElse(a._2, 0.0) + vertexWeightMap.getOrElse(a._1, 1.0)
+          //            )
+          //          })
           travelledSet = travelledSet.union(lastLevelSet)
         }
-//        println(remainEdgeRDD.count())
-//        remainEdgeRDD.foreach(a => print(thisVertex._1+"# vertex remainEdge: " + a.srcId + "->" + a.dstId + ": " + a.attr + "\n"))
-        var bfsTreeGraph = Graph(users, remainEdgeRDD).partitionBy(PartitionStrategy.fromString("EdgePartition1D"))
+        //        println(remainEdgeRDD.count())
+        //        remainEdgeRDD.foreach(a => print(thisVertex._1+"# vertex remainEdge: " + a.srcId + "->" + a.dstId + ": " + a.attr + "\n"))
+        //        var bfsTreeGraph = Graph(users, remainEdgeRDD).partitionBy(PartitionStrategy.fromString("EdgePartition1D"))
         if (thisVertex._1 == 1L) {
-          bfsTreeGraph.edges.foreach(a => print(a.srcId + "->" + a.dstId + ": " + a.attr))
+          bfsTreeEdgeList.foreach(a => print(a._1 + "->" + a._2 ))
         }
-
-        val outDegrees = bfsTreeGraph.outDegrees.cache()
-        val haveOutEdgeVerticeSet = outDegrees.map(_._1).cache().collect().toSet
-//        outDegrees.foreach(a => println("vertex-" + thisVertex._1 + "-bfs-OutDegrees: " + a._1+ "-" + a._2))
+        var bfsEdgeWeightMap = bfsTreeEdgeList.map(a => (a, 0.0)).toMap
+        var outDegreeMap = bfsTreeEdgeList.groupBy(_._1).mapValues(_.size)
+        val haveOutEdgeVerticeSet = outDegreeMap.keySet
+        //        outDegrees.foreach(a => println("vertex-" + thisVertex._1 + "-bfs-OutDegrees: " + a._1+ "-" + a._2))
         var bottomUpLastSet =
-          graph
-            .vertices
-            .map(_._1)
-            .collect()
-            .toSet
-          .diff(haveOutEdgeVerticeSet)
-//        println("bottomUpLastSet Size:" + bottomUpLastSet.size)
-        val inDegreeMap = bfsTreeGraph.inDegrees.cache().collect().toMap
-        var outDegreeMap = outDegrees.collect().toMap
+          travelledSet
+            .diff(haveOutEdgeVerticeSet)
+        //        println("bottomUpLastSet Size:" + bottomUpLastSet.size)
+        val inDegreeMap =  bfsTreeEdgeList.groupBy(_._2).mapValues(_.size)
+//        var outDegreeMap = outDegrees.collect().toMap
         if (thisVertex._1 == 4L) println("indegreeMap:" + inDegreeMap)
         if (thisVertex._1 == 4L) println("outdegreeMap:" + outDegreeMap)
         vertexWeightMap = users.collect().map(a => (a._1, 1.0)).toMap
@@ -131,55 +127,61 @@ object Betweenness {
 //        breakable {
           while (bottomUpLastSet.nonEmpty) {
 //            println("vertex:" + thisVertex +": " + bottomUpLastSet)
-            var travelledEdgeSet = Set[Edge[Double]]()
-            val thisEdges =
-              bfsTreeGraph
-                .edges
-                .filter(a => bottomUpLastSet.contains(a.dstId))
-                .map(a =>
-                  Edge(
-                    a.srcId,
-                    a.dstId,
-                    vertexWeightMap.getOrElse(a.dstId, 1.0) / inDegreeMap.getOrElse(a.dstId, 1).toDouble
-                  )
-                )
-              if (thisVertex._1 == 4L) thisEdges.foreach(a => println("thisEdges:" + a.srcId + "->" + a.dstId + ":" + a.attr))
+//            var travelledEdgeSet = Set[Edge[Double]]()
+            val thisEdges = bfsTreeEdgeList.filter(a => bottomUpLastSet.contains(a._2))
+            thisEdges.foreach(a => {
+              bfsEdgeWeightMap = bfsEdgeWeightMap.updated(
+                a,
+                bfsEdgeWeightMap.getOrElse(a, 0.0) + vertexWeightMap.getOrElse(a._2, 1.0) / inDegreeMap.getOrElse(a._2, 1).toDouble
+              )
+            })
+//            val thisEdges =
+//              bfsTreeGraph
+//                .edges
+//                .filter(a => bottomUpLastSet.contains(a.dstId))
+//                .map(a =>
+//                  Edge(
+//                    a.srcId,
+//                    a.dstId,
+//                    vertexWeightMap.getOrElse(a.dstId, 1.0) / inDegreeMap.getOrElse(a.dstId, 1).toDouble
+//                  )
+//                )
+              if (thisVertex._1 == 4L) thisEdges.foreach(a => println("thisEdges:" + a._1+ "->" + a._2 + ":" + bfsEdgeWeightMap.getOrElse(a, 0.0)))
 //            if (thisEdges.count() == 0) break
-              travelledEdgeSet = travelledEdgeSet.union(thisEdges.collect().toSet)
+//              travelledEdgeSet = travelledEdgeSet.union(thisEdges.collect().toSet)
             thisEdges
-                .collect()
                 .foreach(a => {
                   vertexWeightMap =
                     vertexWeightMap
                       .updated(
-                        a.srcId,
-                        vertexWeightMap.getOrElse(a.srcId, 1.0) + a.attr
+                        a._1,
+                        vertexWeightMap.getOrElse(a._1, 1.0) + bfsEdgeWeightMap.getOrElse(a, 0.0)
                       )
                   outDegreeMap =
                     outDegreeMap
-                      .updated(a.srcId, outDegreeMap.getOrElse(a.srcId, 1) - 1)
+                      .updated(a._1, outDegreeMap.getOrElse(a._1, 1) - 1)
                   }
                 )
             if (thisVertex._1 == 4L) println("outdegreeMap:" + outDegreeMap)
             bottomUpLastSet =
               thisEdges
-                .map(_.srcId)
+                .map(_._1)
                 .filter(a => outDegreeMap.getOrElse(a, 1) == 0)
-                .collect()
                 .toSet
-            bfsTreeGraph =
-              Graph(
-                bfsTreeGraph
-                  .vertices,
-                bfsTreeGraph
-                  .edges
-                  .union(thisEdges)
-              ).groupEdges((a, b) => a + b)
+//            bfsTreeGraph =
+//              Graph(
+//                bfsTreeGraph
+//                  .vertices,
+//                bfsTreeGraph
+//                  .edges
+//                  .union(thisEdges)
+//              ).groupEdges((a, b) => a + b)
+            bfsTreeEdgeList.union(thisEdges).distinct
           }
 //        }
-        if (thisVertex._1 == 4L)
-          bfsTreeGraph.edges.foreach(a => print("vertex-" + thisVertex._1 +"-bfsTree: "  + a.srcId + "->" + a.dstId + ": " + a.attr + "\n"))
-        val ans = bfsTreeGraph.partitionBy(PartitionStrategy.fromString("EdgePartition1D")).groupEdges((a, b) => a + b)
+//        if (thisVertex._1 == 4L) bfsEdgeWeightMap.foreach(a => print("vertex-" + thisVertex._1 +"-bfsTree: "  + a._1._1 + "->" + a._1._2 + ": " + a._2 + "\n"))
+        val ans = bfsEdgeWeightMap.toList
+        //        val ans = bfsTreeGraph.partitionBy(PartitionStrategy.fromString("EdgePartition1D")).groupEdges((a, b) => a + b)
 //        println("I can see output in map!!!")
         ans
       }
@@ -187,35 +189,45 @@ object Betweenness {
     }
     println("hhhhhhhhhhhhhhhhhhhhhhhh")
 
-    val bfsGraphs = initialGraph
+    val bfsEdgesWeight = initialGraph
       .vertices
       .collect()
-      .map(vertexToBfsGraphFunFromGraph(initialGraph))
+      .toList
+      .flatMap(vertexToBfsGraphFunFromGraph(initialGraph))
+      .map(a => {
+        if (a._1._1 > a._1._2) ((a._1._2, a._1._1), a._2)
+        else a
+      })
+      .groupBy(_._1)
+      .mapValues(a => a.map(_._2 / 2.0).sum)
+    bfsEdgesWeight.foreach(a=> print("bfsTree: "  + a._1 + ": " + a._2 + "\n"))
+
+
 //    bfsGraphs.foreach(b => b.edges.foreach(a=> print("bfsTree: "  + a.srcId + "->" + a.dstId + ": " + a.attr + "\n")))
-    var bfsGraphsCombined = bfsGraphs.reduce((a, b) => Graph(a.vertices, a.edges.union(b.edges)))
-    val bfsGraphLargeToSmall =
-      Graph(
-        bfsGraphsCombined
-          .vertices,
-        bfsGraphsCombined
-          .edges
-          .filter(a => a.srcId > a.srcId)
-      )
-    bfsGraphsCombined =
-      Graph(
-        bfsGraphsCombined.vertices,
-        bfsGraphsCombined
-          .edges
-          .filter(a => a.srcId <= a.dstId)
-          .union(
-            bfsGraphLargeToSmall
-              .reverse
-              .edges
-          )
-      )
-
-    bfsGraphsCombined.partitionBy(PartitionStrategy.fromString("EdgePartition1D")).groupEdges((a, b) => a + b).edges.foreach(a=> print("bfsTree: "  + a.srcId + "->" + a.dstId + ": " + a.attr + "\n"))
-
+//    var bfsGraphsCombined = bfsGraphs.reduce((a, b) => Graph(a.vertices, a.edges.union(b.edges)))
+//    val bfsGraphLargeToSmall =
+//      Graph(
+//        bfsGraphsCombined
+//          .vertices,
+//        bfsGraphsCombined
+//          .edges
+//          .filter(a => a.srcId > a.srcId)
+//      )
+//    bfsGraphsCombined =
+//      Graph(
+//        bfsGraphsCombined.vertices,
+//        bfsGraphsCombined
+//          .edges
+//          .filter(a => a.srcId <= a.dstId)
+//          .union(
+//            bfsGraphLargeToSmall
+//              .reverse
+//              .edges
+//          )
+//      )
+//
+//    bfsGraphsCombined.partitionBy(PartitionStrategy.fromString("EdgePartition1D")).groupEdges((a, b) => a + b).edges.foreach(a=> print("bfsTree: "  + a.srcId + "->" + a.dstId + ": " + a.attr + "\n"))
+//
 
 
 
