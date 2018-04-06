@@ -5,6 +5,7 @@ import org.apache.spark.rdd.RDD
 
 object Betweenness {
   def EDGE_THRESHOLD = 7
+  var result:Array[((Long, Long), Double)] = Array[((Long, Long), Double)]()
   def main(args: Array[String]): Unit = {
     //arguments
     val inputFilePath: String = args(0)
@@ -54,6 +55,11 @@ object Betweenness {
         var travelledVertexSet = Set(thisVertex._1) //travelled edges ids in bfs, initialized with current root id
         var lastLevelVertexSet = Set(thisVertex._1) //current level to run bfs from
         var bfsTreeEdgeList = List[(Long, Long)]()  //edges of bfs travelled
+        var vertexPathNumMap = Map[VertexId, Int]()
+        var edgePathNumMap = Map[(VertexId, VertexId), Int]()
+        vertexPathNumMap =
+          vertexPathNumMap
+            .updated(thisVertex._1, 1)
         while (lastLevelVertexSet.nonEmpty) {         //run bfs from root
           val thisLevelEdgesList =      //filter out edges of this level from all edges, filter by start vertex
             allEdges
@@ -63,6 +69,21 @@ object Betweenness {
           bfsTreeEdgeList =
             bfsTreeEdgeList
               .union(thisLevelEdgesList)      //add this level to whole edge list
+          thisLevelEdgesList
+            .foreach(a => {
+              edgePathNumMap =
+                edgePathNumMap
+                  .updated(
+                    a,
+                    vertexPathNumMap.getOrElse(a._1, 1)
+                  )
+              vertexPathNumMap =
+                vertexPathNumMap
+                  .updated(
+                    a._2,
+                    vertexPathNumMap.getOrElse(a._2, 0) + vertexPathNumMap.getOrElse(a._1, 1)
+                  )
+          })
           lastLevelVertexSet =
             thisLevelEdgesList
               .map(_._2)
@@ -92,6 +113,10 @@ object Betweenness {
         var vertexWeightMap = users
           .map(a => (a, 1.0))
           .toMap                                //store weight of a vertex in a map
+        if (thisVertex._1 == 4L) {
+          println(vertexPathNumMap)
+          println(edgePathNumMap)
+        }
         while (bottomUpLastSet.nonEmpty) {
             val thisEdges =
               bfsTreeEdgeList
@@ -101,7 +126,8 @@ object Betweenness {
               bfsEdgeWeightMap = bfsEdgeWeightMap.updated(
                 a,
                 bfsEdgeWeightMap
-                  .getOrElse(a, 0.0) + vertexWeightMap.getOrElse(a._2, 1.0) / inDegreeMap.getOrElse(a._2, 1).toDouble
+                  .getOrElse(a, 0.0) + vertexWeightMap.getOrElse(a._2, 1.0) * vertexPathNumMap.getOrElse(a._1, 1).toDouble / vertexPathNumMap.getOrElse(a._2, 1).toDouble
+              //give credit to edge as the fration of numbers of shortest path to dst going through this edge
               )
             })
             thisEdges
@@ -150,15 +176,17 @@ object Betweenness {
 //      .foreach(a=> print("bfsTree: "  + a._1 + ": " + a._2 + "\n"))
 //    println("count:" + bfsEdgesBetweenness.count())
     //output to file
-    val writer = new PrintWriter(new File(outputDirPath + "Zhaoyang_Li_ Betweenness.txt"))
-    bfsEdgesBetweenness
+    result = bfsEdgesBetweenness
       .collect()
       .sortBy(_._1._2)
       .sortBy(_._1._1)
+    val writer = new PrintWriter(new File(outputDirPath + "Zhaoyang_Li_Betweenness.txt"))
+    result
       .foreach(a =>
         writer.write("(" + a._1._1 + "," + a._1._2 + "," + a._2 + ")\n" )
       )
     writer.close()
+
   }
 }
 
