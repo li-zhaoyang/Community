@@ -92,7 +92,7 @@ object Community {
         .map(a => ((a.srcId, a.dstId), 1))
         .collect()
         .toMap
-    var maxMod = modularity(initialGraph, edgeOneMap)
+    var initialMod = modularity(initialGraph, edgeOneMap)
     var index = -1
 //    for (i <- 0 until edgeNum) {
 //      thisGraph =
@@ -110,16 +110,10 @@ object Community {
 //      }
 //      println(i + ": " + thisMod)
 //    }
-    val takeOfEdgeSet = initialSortedEdgeWeights.take(50).map(_._1).toSet
-    thisGraph =
+    var start = 0
+    var end = initialSortedEdgeWeights.length - 1
+    var communities =
       initialGraph
-      .subgraph(x =>
-                !takeOfEdgeSet.contains((x.srcId, x.dstId)) && !takeOfEdgeSet.contains((x.dstId, x.srcId))
-              ).cache()
-    val mod = modularity(thisGraph, edgeOneMap)
-    println(mod)
-    val communities =
-      thisGraph
         .connectedComponents()
         .vertices
         .groupBy(_._2)
@@ -127,6 +121,29 @@ object Community {
         .values
         .collect()
         .sortBy(a => a.head)
+    while (start < end) {
+      var mid = start + (end  - start) / 2
+      val takeOfEdgeSet = initialSortedEdgeWeights.take(mid).map(_._1).toSet
+      thisGraph =
+        initialGraph
+          .subgraph(x =>
+            !takeOfEdgeSet.contains((x.srcId, x.dstId)) && !takeOfEdgeSet.contains((x.dstId, x.srcId))
+          ).cache()
+      val mod = modularity(thisGraph, edgeOneMap)
+      println(mid + "" + mod)
+      communities =
+        thisGraph
+          .connectedComponents()
+          .vertices
+          .groupBy(_._2)
+          .mapValues(a => a.map(_._1).toList.sorted)
+          .values
+          .collect()
+          .sortBy(a => a.head)
+      if (mod < initialMod) end = mid - 1
+      else start += 1
+    }
+
 
     val writer = new PrintWriter(new File(outputDirPath + "Zhaoyang_Li_Community.txt"))
     communities
